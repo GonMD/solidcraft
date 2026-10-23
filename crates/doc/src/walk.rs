@@ -60,6 +60,15 @@ impl Walk for crate::document::ExtendMode {}
 impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}
+impl Walk for crate::document::WeldCorner {}
+impl Walk for crate::document::WeldLocate {}
+impl Walk for crate::document::WeldMirror {}
+impl Walk for crate::document::WeldStock {}
+impl Walk for crate::document::WeldTrimMode {}
+impl Walk for crate::document::WeldEndSide {}
+impl Walk for crate::document::WeldPlateSide {}
+impl Walk for crate::document::WeldCapCorner {}
+impl Walk for crate::document::WeldBeadKind {}
 
 /// A reference walks itself: a sketch, a feature or a body.
 macro_rules! reference {

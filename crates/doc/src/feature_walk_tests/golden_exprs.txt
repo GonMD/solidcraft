@@ -398,3 +398,37 @@ mesh_convert
     Tolerance = mesh_convert.tolerance (Length)
   expressions: mesh_convert.tolerance
 mesh_import
+weld_member
+  inputs:
+    Angle = member.angle (Angle)
+    Angle = member.group_angle (Angle)
+    Gap = member.gap (Length)
+    End allowance = member.end_allowance (Length)
+  expressions: member.angle, member.group_angle, member.gap, member.end_allowance
+weld_trim
+  inputs:
+    Angle = weld_trim.angle (Angle)
+    Offset = weld_trim.offset (Length)
+    Gap = weld_trim.gap (Length)
+  expressions: weld_trim.angle, weld_trim.offset, weld_trim.gap
+weld_end_cap
+  inputs:
+    Thickness = end_cap.thickness (Length)
+    Inset = end_cap.inset (Length)
+  expressions: end_cap.thickness, end_cap.inset
+weld_gusset
+  inputs:
+    Size = gusset.size (Length)
+    Size 2 = gusset.size2 (Length)
+    Thickness = gusset.thickness (Length)
+    Edge = gusset.edge (Length)
+    Clip = gusset.clip (Length)
+    Offset = gusset.offset (Length)
+  expressions: gusset.size, gusset.size2, gusset.thickness, gusset.edge, gusset.clip, gusset.offset
+weld_bead
+  inputs:
+    Size = bead.size (Length)
+    Gap = bead.gap (Length)
+    Length = bead.length (Length)
+    Pitch = bead.pitch (Length)
+  expressions: bead.size, bead.gap, bead.length, bead.pitch

@@ -76,7 +76,7 @@ pub const SECTIONS: &[Section] = &[
         promoted: 1,
         ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.spline3d", "sketch.point3d", "sketch.move3d"],
     },
-    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
+    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole", "weld.member"] },
     Section {
         tab: "MODEL",
         panel: "MODIFY",
@@ -259,6 +259,14 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SHEET METAL", panel: "OUTPUT", promoted: 2, ids: &["sheet.export_dxf", "sheet.export_bend_table"] },
     Section { tab: "SHEET METAL", panel: "RULES", promoted: 1, ids: &["sheet.manage_rules"] },
     Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
+    Section {
+        tab: "WELDMENT",
+        panel: "CREATE",
+        promoted: 4,
+        ids: &["sketch.create", "weld.member", "weld.end_cap", "weld.gusset", "weld.bead", "sketch.line3d"],
+    },
+    Section { tab: "WELDMENT", panel: "MODIFY", promoted: 1, ids: &["weld.trim_extend"] },
+    Section { tab: "WELDMENT", panel: "OUTPUT", promoted: 2, ids: &["weld.cut_list", "weld.export_cut_list"] },
     Section { tab: "RENDER", panel: "SCENE", promoted: 2, ids: &["render.scene"] },
     Section { tab: "RENDER", panel: "IMAGE", promoted: 1, ids: &["render.start"] },
 ];
@@ -318,6 +326,9 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("timeline.dependents", "Dependents"),
     ("view.apply", "Restore View"),
     ("view.save", "Save View"),
+    ("weld.export_cut_list", "Export List"),
+    ("weld.member", "Member"),
+    ("weld.trim_extend", "Trim / Extend"),
 ];
 
 pub fn ribbon_button_label(command: &CommandSpec) -> &str {
@@ -346,6 +357,9 @@ pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
     ("SKETCH", "FINISH SKETCH", "SKETCH", "FINISH SKETCH"),
     ("SHEET METAL", "CREATE", "SHEET METAL", "CREATE"),
     ("SHEET METAL", "MODIFY", "SHEET METAL", "FLAT"),
+    ("WELDMENT", "CREATE", "WELDMENT", "CREATE"),
+    ("WELDMENT", "MODIFY", "WELDMENT", "MODIFY"),
+    ("WELDMENT", "INSPECT", "WELDMENT", "OUTPUT"),
     ("PLASTIC", "CREATE", "MODEL", "CREATE"),
     ("PLASTIC", "SETUP", "MANAGE", "RULES"),
     ("MESH", "MODIFY", "INSERT", "FILES"),
@@ -364,6 +378,7 @@ pub fn destination(c: &CommandSpec) -> Option<(&'static str, &'static str)> {
         "sheet.convert" => Some(("MODEL", "MODIFY")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
         "config.table" | "config.configure" => Some(("MANAGE", "CONFIGURATIONS")),
+        "weld.member" => Some(("WELDMENT", "CREATE")),
         _ => None,
     };
     primary
@@ -392,15 +407,15 @@ pub fn legacy_destination(tab: &str, panel: &str, id: &str) -> Option<(&'static 
 }
 
 pub fn legacy_panel(tab: &str, panel: &str) -> Option<(&'static str, &'static str)> {
-    if panel == "SELECT" && matches!(tab, "SOLID" | "SURFACE" | "MESH" | "SHEET METAL" | "PLASTIC" | "UTILITIES" | "SKETCH") {
+    if panel == "SELECT" && matches!(tab, "SOLID" | "SURFACE" | "MESH" | "SHEET METAL" | "PLASTIC" | "WELDMENT" | "UTILITIES" | "SKETCH") {
         return Some(("VIEW", "SELECT"));
     }
     PLACEMENTS.iter().find(|(t, p, ..)| *t == tab && *p == panel).map(|(_, _, t, p)| (*t, *p)).or(match (tab, panel) {
         ("PLASTIC" | "SHEET METAL", "MODIFY") => Some(("MODEL", "MODIFY")),
-        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "ASSEMBLE") => Some(("ASSEMBLE", "JOINTS")),
-        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "CONSTRUCT") => Some(("MODEL", "CONSTRUCT")),
-        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSPECT") => Some(("INSPECT", "CHECK")),
-        ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSERT") => Some(("INSERT", "FILES")),
+        ("PLASTIC" | "SHEET METAL" | "WELDMENT" | "SURFACE" | "MESH", "ASSEMBLE") => Some(("ASSEMBLE", "JOINTS")),
+        ("PLASTIC" | "SHEET METAL" | "WELDMENT" | "SURFACE" | "MESH", "CONSTRUCT") => Some(("MODEL", "CONSTRUCT")),
+        ("PLASTIC" | "SHEET METAL" | "WELDMENT" | "SURFACE" | "MESH", "INSPECT") => Some(("INSPECT", "CHECK")),
+        ("PLASTIC" | "SHEET METAL" | "WELDMENT" | "SURFACE" | "MESH", "INSERT") => Some(("INSERT", "FILES")),
         ("MESH", "CREATE" | "PREPARE") => Some(("SURFACE", "CONVERT")),
         ("UTILITIES", "MAKE" | "ADD-INS" | "UTILITY") => Some(("MANAGE", "DESIGN")),
         ("UTILITIES", "INSPECT") => Some(("INSPECT", "CHECK")),
@@ -408,7 +423,7 @@ pub fn legacy_panel(tab: &str, panel: &str) -> Option<(&'static str, &'static st
     })
 }
 
-/// Timeline and browser icon of the sheet metal and plastic features (`None`: not one of them).
+/// Timeline and browser icon of the sheet metal, plastic and weldment features (`None`: not one of them).
 pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
     Some(match k {
         FeatureKind::SheetBase { .. } | FeatureKind::SheetContour { .. } | FeatureKind::SheetFlange { .. } => "flange",
@@ -423,6 +438,11 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::Rest { .. } => "rest",
         FeatureKind::Rib { web: true, .. } => "web",
         FeatureKind::Rib { .. } => "rib",
+        FeatureKind::WeldMember { .. } => "sweep",
+        FeatureKind::WeldTrim { .. } => "trim",
+        FeatureKind::WeldEndCap { .. } => "thicken",
+        FeatureKind::WeldGusset { .. } => "web",
+        FeatureKind::WeldBead { .. } => "fillet",
         _ => return None,
     })
 }
@@ -454,19 +474,35 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
     // Always reachable, as before the ribbon redesign: a sheet-metal part starts from an
     // ordinary sketch or solid, so the tab cannot wait for a sheet body.
     tabs.push("SHEET METAL");
+    if weldment(app) {
+        tabs.push("WELDMENT");
+    }
     tabs
 }
 
+/// Does the design have a structural member (the WELDMENT tab's context)?
+pub fn weldment(app: &crate::SolveApp) -> bool {
+    app.session.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::WeldMember { .. }))
+}
+
 /// Select contextual tabs on entry (or a different sheet body), allowing the other tabs to
-/// remain usable for the rest of that context. Sketch takes precedence over sheet metal.
+/// remain usable for the rest of that context. Sketch takes precedence over sheet metal, and sheet
+/// metal over a weldment.
 pub fn sync_context(app: &mut crate::SolveApp) {
     if crate::render_workspace::active(app) {
         return;
     }
-    let context = app.session.active_sketch.map(|id| format!("sketch:{id}")).or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")));
+    let context = app
+        .session
+        .active_sketch
+        .map(|id| format!("sketch:{id}"))
+        .or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")))
+        .or_else(|| weldment(app).then(|| "weldment".to_string()));
     if app.ui.ribbon_context != context {
         app.ui.tab = if app.session.active_sketch.is_some() {
             "SKETCH"
+        } else if context.as_deref() == Some("weldment") {
+            "WELDMENT"
         } else if context.is_some() {
             "SHEET METAL"
         } else {
@@ -723,6 +759,37 @@ mod tests {
 
     fn panel_ids(tab: &str, specs: &[&CommandSpec]) -> Vec<&'static str> {
         SECTIONS.iter().filter(|s| s.tab == tab).flat_map(|s| layout(tab, s.panel, specs).unwrap().0).map(|c| c.id).collect()
+    }
+
+    /// Structural Member starts from MODEL › CREATE; once the design has one, the WELDMENT tab
+    /// joins the tabs, is selected, and lists the weldment commands.
+    #[test]
+    fn the_weldment_tab_follows_the_design() {
+        let specs = solidcraft_engine::command_specs();
+        let ids = |tab, panel| layout(tab, panel, &specs).unwrap().0.iter().map(|c| c.id).collect::<Vec<_>>();
+        assert!(ids("MODEL", "CREATE").contains(&"weld.member"));
+        assert_eq!(ids("WELDMENT", "CREATE").get(1).copied(), Some("weld.member"));
+        assert!(ids("WELDMENT", "MODIFY").contains(&"weld.trim_extend"));
+        assert_eq!(ids("WELDMENT", "OUTPUT"), ["weld.cut_list", "weld.export_cut_list"]);
+        let mut h = crate::scenario::Harness::new();
+        assert!(!visible_tabs(&h.app).contains(&"WELDMENT"));
+        for (cmd, p) in [
+            ("sketch.create", json!({"plane": "YZ", "name": "Tube"})),
+            ("sketch.line", json!({"points": [[-25, -25], [25, -25], [25, 25], [-25, 25]], "closed": true})),
+            ("sketch.finish", json!({})),
+            ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
+            ("sketch.line", json!({"points": [[0, 0], [500, 0]], "ids": ["a"]})),
+            ("sketch.finish", json!({})),
+            ("weld.member", json!({"sketch": "Tube", "path_sketch": "Frame", "path": ["a"]})),
+        ] {
+            h.app.run(cmd, p).unwrap_or_else(|e| panic!("{cmd}: {e}"));
+        }
+        sync_context(&mut h.app);
+        assert!(visible_tabs(&h.app).contains(&"WELDMENT"));
+        assert_eq!(h.app.ui.tab, "WELDMENT");
+        h.app.ui.tab = "INSPECT".into();
+        sync_context(&mut h.app);
+        assert_eq!(h.app.ui.tab, "INSPECT", "the other tabs stay usable");
     }
 
     #[test]

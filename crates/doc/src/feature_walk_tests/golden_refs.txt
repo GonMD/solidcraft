@@ -221,3 +221,15 @@ import
 mesh_convert
   remap_bodies: body
 mesh_import
+weld_member
+  sketches: [1, 2, 3]
+  remap_refs: groups[0].path_sketch, path_sketch, sketch
+weld_trim
+  remap_refs: plane.base.base.name
+  remap_bodies: face.body, members[0], to[0]
+weld_end_cap
+  remap_bodies: ends[0].member
+weld_gusset
+  remap_bodies: members[0], members[1]
+weld_bead
+  remap_bodies: bodies[0], bodies[1]

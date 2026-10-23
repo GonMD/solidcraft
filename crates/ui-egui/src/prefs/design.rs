@@ -50,4 +50,28 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         setting::offer_stand_up(app, ui);
         ui_kit::text(ui, app.tr("prefs.stand_up_note"), ui_kit::Text::Hint("stand_up"));
     });
+    ui_kit::settings_section(ui, "cut_list", app.tr("cmd.weld_cut_list"), |ui| {
+        ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
+            ui_kit::row(ui, app.tr_label("Cut list length tolerance"), |ui| {
+                let decimals = app.preferences.length_decimals.max(3);
+                let r = ui_kit::length_field(ui, &mut app.preferences.cut_list_length_tolerance, &app.session.doc.units, decimals);
+                app.preferences.cut_list_length_tolerance = app.preferences.cut_list_length_tolerance.clamp(0.0, CUT_LIST_TOLERANCE_MAX);
+                r
+            });
+            ui_kit::row(ui, app.tr_label("Cut list angle tolerance"), |ui| {
+                ui_kit::number_field(ui, &mut app.preferences.cut_list_angle_tolerance, 0.0..=CUT_LIST_TOLERANCE_MAX, 0.01, "°")
+            });
+            ui_kit::row(ui, app.tr_label("Saw kerf"), |ui| {
+                let decimals = app.preferences.length_decimals.max(3);
+                let r = ui_kit::length_field(ui, &mut app.preferences.cut_list_kerf, &app.session.doc.units, decimals);
+                app.preferences.cut_list_kerf = app.preferences.cut_list_kerf.clamp(0.0, KERF_MAX);
+                r
+            });
+        });
+        ui_kit::text(
+            ui,
+            crate::i18n::tr_label("Structural members whose lengths and end angles differ by no more than these share a cut list row."),
+            ui_kit::Text::Hint("cut_list"),
+        );
+    });
 }

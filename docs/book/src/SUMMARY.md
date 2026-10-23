@@ -11,6 +11,7 @@
 - [Parameters and expressions](guide/parameters.md)
 - [Components and joints](guide/assemblies.md)
 - [Sheet metal](guide/sheet-metal.md)
+- [Weldments](guide/weldments.md)
 - [Plastic parts](guide/plastic.md)
 - [Import and export](guide/files.md)
 - [Keyboard shortcuts](guide/shortcuts.md)

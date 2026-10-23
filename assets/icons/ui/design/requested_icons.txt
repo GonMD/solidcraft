@@ -263,6 +263,7 @@ surface_untrim	false
 svg	false
 sweep	false
 text	false
+thicken	false
 thread	false
 torus	false
 trace	false

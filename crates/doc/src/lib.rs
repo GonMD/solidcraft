@@ -51,6 +51,7 @@ mod project3d;
 pub mod render_settings;
 pub use project3d::iso_grid;
 pub mod sheet;
+pub mod weld;
 
 pub use assembly::{
     IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, apply_point, apply_vector, is_identity, map_point_expr, mat_inverse, mat_mul,
@@ -64,6 +65,7 @@ pub use eval::{
     parse_metric_thread, pattern_matrices, revolve_extent, revolve_extent_with_convention, select_profiles, sketch_hole_direction, sketch_line_plane,
     state_in_frame, state_in_frame_at, suggested_thread, tangent_face_chain, through_all_distance, world_state, world_state_reusing,
 };
+pub use eval::{MAX_WELD_MEMBERS, WeldCornerAt, weld_corners, weld_member_keys};
 pub use expr::Expr;
 pub use names::{BodyName, FeatureName, SketchId};
 pub use params::{ParamRow, ParamUser, cycles};

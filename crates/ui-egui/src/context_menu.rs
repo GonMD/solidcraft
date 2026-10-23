@@ -89,6 +89,12 @@ pub enum Target {
         folder: String,
         scope: String,
     },
+    /// The weldment's Cut List folder.
+    CutList,
+    /// A sub-weldment's folder in the Cut List (its id).
+    SubWeldment {
+        id: u64,
+    },
 }
 
 /// One menu entry: a command id (run with `params` when given, else started like a toolbar
@@ -235,6 +241,7 @@ pub enum RenameWhat {
     Canvas(u64),
     View(String),
     Joint(u64),
+    SubWeldment(u64),
 }
 
 #[derive(Clone, Debug)]
@@ -356,6 +363,8 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::Section => crate::browser::section_items(app),
+        Target::CutList => crate::browser::cut_list_items(app),
+        Target::SubWeldment { id } => crate::browser::sub_weldment_items(app, *id),
         Target::Joint { id } => joint_items(app, *id),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
@@ -607,6 +616,18 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
         act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })),
     ];
+    if !app.session.model.state().welds.is_empty() {
+        let doc = &app.session.doc;
+        v.push(Item::sep());
+        v.push(cmd(app, "weld.sub_weldment", "Create Sub-weldment").with(json!({ "bodies": names })));
+        // Bodies all in one sub-weldment can leave it.
+        let mut theirs = bodies.iter().map(|b| doc.sub_weldments.iter().find(|w| w.bodies.contains(b)).map(|w| w.id));
+        if let Some(Some(id)) = theirs.next()
+            && theirs.all(|w| w == Some(id))
+        {
+            v.push(cmd(app, "weld.dissolve_sub_weldment", "weld.remove_from_sub_weldment").with(json!({ "sub_weldment": id, "bodies": names })));
+        }
+    }
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
@@ -1050,6 +1071,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 RenameWhat::View(v.to_string())
             } else if let Some(j) = id_of(&p, "joint") {
                 RenameWhat::Joint(j)
+            } else if let Some(w) = id_of(&p, "sub_weldment") {
+                RenameWhat::SubWeldment(w)
             } else {
                 return;
             };
@@ -1430,6 +1453,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::Canvas(c) => doc.canvases.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
         RenameWhat::View(v) => v.clone(),
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
+        RenameWhat::SubWeldment(w) => doc.sub_weldments.iter().find(|x| x.id == *w).map(|x| x.name.clone()).unwrap_or_default(),
     };
     app.menu.rename = Some(Rename { what, text, at, focused: false });
 }
@@ -1456,6 +1480,7 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
         RenameWhat::Canvas(c) => drop(app.run("canvas.edit", json!({ "canvas": c, "name": name }))),
         RenameWhat::View(v) => drop(app.run("view.rename", json!({ "view": v, "name": name }))),
         RenameWhat::Joint(j) => drop(app.run("joint.edit", json!({ "joint": j, "name": name }))),
+        RenameWhat::SubWeldment(w) => drop(app.run("weld.rename_sub_weldment", json!({ "sub_weldment": w, "name": name }))),
     }
 }
 

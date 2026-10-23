@@ -909,6 +909,21 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
             *k = made;
         }
     }
+    // Weld beads: each seam a bead welds, drawn over the model where both its bodies are shown.
+    // Amber, from the warning token until welds have a colour of their own.
+    let bead_col = c4(tk.warning);
+    for bead in st.beads.iter().filter(|b| b.bodies.iter().all(|n| app.session.body_visible(n) && st.body(n).is_some())) {
+        for seam in &bead.seams {
+            for w in seam.windows(2) {
+                // In a corner the seam's line fights with both faces: where they hide it, it
+                // still shows dimmed (as a picked edge does).
+                if let [a, b] = w {
+                    sc.line(a.to_f32(), b.to_f32(), bead_col, 3.5, false);
+                    sc.hidden_line(a.to_f32(), b.to_f32(), c4(tk.warning.gamma_multiply(0.55)), 2.5);
+                }
+            }
+        }
+    }
     // Continuity analysis: each seam `inspect.continuity` measured, drawn over the model in the
     // colour of its worst verdict.
     for seam in &s.continuity {
@@ -1445,7 +1460,10 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     let (o, d) = proj.ray(pos);
     // Sketch points of the active sketch (of every shown sketch while a command takes points,
     // while idle or projecting, and while 3D drawing snaps to points on other visible sketches).
-    let wants_points = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::POINTS != 0);
+    let wants_points = app
+        .dialog
+        .as_ref()
+        .is_some_and(|d| d.locate_pick_sketch().is_some() || d.active_input().is_some_and(|i| i.accept & crate::selection::POINTS != 0));
     let external_points =
         wants_points || other_sketch_points || (app.dialog.is_none() && app.tool.as_ref().is_none_or(|tool| tool.cmd == "sketch.project"));
     let point_sketches: Vec<u64> = if external_points { visible_sketches(app) } else { s.active_sketch.into_iter().collect() };
@@ -1986,6 +2004,16 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         return;
     }
     let Some(mut d) = app.dialog.take() else { return };
+    // A Structural Member's located point is the picked point, not an input's item.
+    if let (Some(profile), Hit::SketchPoint { sketch, at, .. }) = (d.locate_pick_sketch(), hit)
+        && let crate::dialogs::Kind::WeldMember { place, .. } = &mut d.kind
+    {
+        if *sketch == profile {
+            place.set_point([at.x, at.y]);
+        }
+        app.dialog = Some(d);
+        return;
+    }
     d.pick(&app.session, sel);
     if let crate::dialogs::Kind::PathPlane { sketch, .. } = &mut d.kind {
         *sketch = match hit {
@@ -1993,6 +2021,10 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
             _ => None,
         };
         d.extra.remove("path");
+    }
+    // So do a Structural Member's skeleton lines.
+    if let (crate::dialogs::Kind::WeldMember { groups, .. }, Hit::SketchCurve { sketch, .. }) = (&mut d.kind, hit) {
+        groups.picked(d.active, *sketch);
     }
     // Split Body's sketch line keeps the sketch it was picked in (curve ids repeat across sketches).
     if matches!(d.kind, crate::dialogs::Kind::Split) {
@@ -3665,6 +3697,12 @@ fn grid_centre(tf: Vec3, back: Vec3, n: Vec3, ext: f64) -> Vec3 {
 /// Hover feedback for the active sketch's points and curves (drawn on top of everything).
 fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let col = Tokens::get().hover_profile_edge;
+    // The Structural Member dialog's corner row under the pointer.
+    if let Some(crate::dialogs::Kind::WeldMember { groups, .. }) = app.dialog.as_ref().map(|d| &d.kind)
+        && let Some(p) = groups.hovered.and_then(|at| proj.to_screen(at))
+    {
+        painter.circle_stroke(p, 10.0, Stroke::new(2.5, col));
+    }
     let st = crate::open_meshing::shown_world(app);
     match &app.viewport.hover {
         // Trim shows the piece it would take away instead (`sketch_tools::preview`, #3052).

@@ -18,7 +18,10 @@ mod occurrence_gizmo_tests;
 #[path = "browser_model.rs"]
 mod model;
 
+mod cut_list;
 mod features;
+
+pub use cut_list::{folder_items as cut_list_items, sub_weldment_items};
 
 pub(crate) fn reveal_feature(app: &mut SolveApp, id: u64, body: &str) {
     features::reveal(app, id, body);
@@ -104,6 +107,8 @@ pub struct TreeState {
     anchor: Option<String>,
     /// Row keys in drawing order this frame (for Shift ranges).
     order: Vec<String>,
+    /// The weldment's cut list, for its folder.
+    cut_list: cut_list::Cache,
 }
 
 /// Moving an occurrence: the offsets typed so far (pending until Capture Position).
@@ -1053,6 +1058,9 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     for folder in ["bodies", "sketches", "construction"] {
         folder_rows(app, ui, id, folder, d, acts);
     }
+    if id == 0 {
+        cut_list::rows(app, ui, d, acts);
+    }
     features::rows(app, ui, id, &[], d, acts);
     if id == 0 {
         crate::dialogs_assembly::browser_joints(app, ui, d);
@@ -1627,19 +1635,7 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
             .into_iter()
             .filter_map(|i| state.bodies.get(i))
             .filter(|b| !app.session.body_removed_later(&b.name))
-            .map(|b| Entry {
-                key: b.name.clone(),
-                row_key: format!("b:{}", b.name),
-                label: b.name.clone(),
-                icon: "body",
-                visible: !app.session.visibility.hidden_bodies.contains(&b.name),
-                selected: sel.iter().any(|x| matches!(x, Sel::Body { name } if *name == b.name)),
-                color: None,
-                locked: app.ui.locked_bodies.contains(&b.name),
-                sel: Some(Sel::Body { name: b.name.clone() }),
-                target: Some(Target::Body { name: b.name.clone() }),
-                bodies: vec![b.name.clone()],
-            })
+            .map(|b| body_entry(app, &b.name))
             .collect(),
         "sketches" => model_feature_indices(app, comp, true)
             .into_iter()
@@ -1686,6 +1682,23 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
                 bodies: Vec::new(),
             })
             .collect(),
+    }
+}
+
+/// A body's entry (its row in a Bodies folder or under a cut list item).
+fn body_entry(app: &SolveApp, name: &str) -> Entry {
+    Entry {
+        key: name.to_string(),
+        row_key: format!("b:{name}"),
+        label: name.to_string(),
+        icon: "body",
+        visible: !app.session.visibility.hidden_bodies.iter().any(|b| b == name),
+        selected: app.session.selection.iter().any(|x| matches!(x, Sel::Body { name: n } if n == name)),
+        color: None,
+        locked: app.ui.locked_bodies.iter().any(|b| b == name),
+        sel: Some(Sel::Body { name: name.to_string() }),
+        target: Some(Target::Body { name: name.to_string() }),
+        bodies: vec![name.to_string()],
     }
 }
 
@@ -2048,10 +2061,13 @@ enum DropAction {
     Order { comp: u64, folder: &'static str, keys: Vec<String>, order: Vec<String> },
     /// Into another component (bodies and sketches).
     Component { to: u64, folder: &'static str, keys: Vec<String> },
+    /// Bodies into a sub-weldment, or out of theirs (`None`).
+    SubWeldment { id: Option<u64>, keys: Vec<String> },
 }
 
 fn apply_drop(app: &mut SolveApp, d: DropAction) {
     match d {
+        DropAction::SubWeldment { id, keys } => cut_list::drop_bodies(app, id, keys),
         DropAction::Move { comp, folder, keys, group, before } => {
             let _ = app.run("browser.move", json!({ "component": comp, "folder": folder, "items": keys, "group": group, "before": before }));
         }

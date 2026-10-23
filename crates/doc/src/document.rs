@@ -301,6 +301,230 @@ impl SweepOrientation {
     }
 }
 
+/// How two weldment members meeting at their ends are joined.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WeldCorner {
+    /// Both cut on the plane halfway between them.
+    #[default]
+    Mitre,
+    /// One runs through, cut square past the other; the other butts against its face.
+    Butt,
+}
+
+impl WeldCorner {
+    pub fn is_mitre(&self) -> bool {
+        *self == WeldCorner::Mitre
+    }
+}
+
+/// Which point of a structural member's profile lies on its skeleton line: the centroid, one of
+/// the nine points of the profile's bounding box, or a point in the profile's own coordinates
+/// (its sketch's, or the library profile's).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WeldLocate {
+    #[default]
+    Centroid,
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Middle,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+    Point([f64; 2]),
+}
+
+impl WeldLocate {
+    pub fn is_centroid(&self) -> bool {
+        *self == WeldLocate::Centroid
+    }
+}
+
+/// How a structural member's profile is mirrored, about the axes through its located point:
+/// left to right (about the vertical axis) or top to bottom (about the horizontal axis).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WeldMirror {
+    #[default]
+    None,
+    LeftRight,
+    UpDown,
+}
+
+impl WeldMirror {
+    pub fn is_none(&self) -> bool {
+        *self == WeldMirror::None
+    }
+}
+
+/// A structural member's profile copied from a profile library: its name (the stock the cut list
+/// names), its outline, so the design builds without the library, the cut list description and
+/// free properties the library gives its members, and the lengths (mm) the stock is bought in.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeldStock {
+    pub name: String,
+    pub region: solidcraft_geom::Region2,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub properties: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lengths: Vec<f64>,
+}
+
+/// A weldment body's cut list entry, set by hand: its description and free properties (over its
+/// library profile's) and whether it is left out of the cut list.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CutListProps {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub properties: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exclude: bool,
+}
+
+impl CutListProps {
+    pub fn is_empty(&self) -> bool {
+        *self == CutListProps::default()
+    }
+}
+
+/// A weldment sub-weldment: bodies (by name) listed in a cut list section of their own. A body
+/// belongs to at most one.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubWeldment {
+    pub id: u64,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<String>,
+}
+
+/// Which ends a Trim/Extend may move: cut back, lengthen, or either.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WeldTrimMode {
+    #[default]
+    Both,
+    Trim,
+    Extend,
+}
+
+impl WeldTrimMode {
+    pub fn is_both(&self) -> bool {
+        *self == WeldTrimMode::Both
+    }
+}
+
+/// One joint of a Structural Member joined otherwise than the feature's corner: the two members
+/// that meet there (their skeleton lines), how, and for a butt the one that runs through
+/// (default: the one listed first in the feature's path).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct WeldJoint {
+    pub members: [String; 2],
+    pub corner: WeldCorner,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub through: Option<String>,
+}
+
+/// A further group of a Structural Member's skeleton lines, from its own sketch, with its own
+/// profile angle and corner where given (else the feature's). Its members are keyed `N:line`
+/// (`N` the group's number, the feature's own `path` being group 1) in `joints`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct WeldGroup {
+    pub path_sketch: SketchId,
+    pub path: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Angle")]
+    pub angle: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner: Option<WeldCorner>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locate: Option<WeldLocate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror: Option<WeldMirror>,
+}
+
+/// Which end of a weldment member: the start or the end of its skeleton line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WeldEndSide {
+    #[default]
+    Start,
+    End,
+}
+
+impl WeldEndSide {
+    /// 0 for the start, 1 for the end.
+    pub fn index(&self) -> usize {
+        usize::from(*self == WeldEndSide::End)
+    }
+}
+
+/// Which side of its plane a weldment plate's thickness lies on: half each way, or all of it
+/// on one side (toward the plane's normal) or the other.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WeldPlateSide {
+    #[default]
+    Center,
+    One,
+    Other,
+}
+
+impl WeldPlateSide {
+    pub fn is_center(&self) -> bool {
+        *self == WeldPlateSide::Center
+    }
+}
+
+/// How a weldment end cap's corners are finished: left square, or chamfered or rounded off by
+/// its `corner_size`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WeldCapCorner {
+    #[default]
+    Square,
+    Chamfer,
+    Fillet,
+}
+
+impl WeldCapCorner {
+    pub fn is_square(&self) -> bool {
+        *self == WeldCapCorner::Square
+    }
+}
+
+/// What a weldment Weld Bead is: a fillet weld in the corner where two parts meet (`size` its
+/// leg), or a groove weld filling the seam where they butt (`size` its throat, the depth welded).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WeldBeadKind {
+    #[default]
+    Fillet,
+    Groove,
+}
+
+impl WeldBeadKind {
+    pub fn is_fillet(&self) -> bool {
+        *self == WeldBeadKind::Fillet
+    }
+}
+
+/// One end of a structural member: its body and which end of its skeleton line.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct WeldEndRef {
+    pub member: BodyName,
+    pub end: WeldEndSide,
+}
+
 /// A sweep's or a loft's guide rail: a chain of curves of a sketch, followed from the end nearest
 /// the path's start (the loft's first section).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
@@ -897,6 +1121,170 @@ pub enum FeatureKind {
         operation: Operation,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
+    },
+    /// Weldment structural members: a closed profile along each straight skeleton line, one body
+    /// per line, mitred where two members meet and cut square at free ends. Each member's body
+    /// name is the `body_names` entry at its key's place in [`FeatureKind::weld_keys`].
+    WeldMember {
+        /// The profile's sketch, where `stock` doesn't give the profile.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<SketchId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(profiles_of = sketch)]
+        profiles: Option<ProfileSel>,
+        /// A profile copied from a profile library, in place of `sketch`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stock: Option<WeldStock>,
+        path_sketch: SketchId,
+        path: Vec<String>,
+        /// The profile's turn about each member's line.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
+        /// The point of the profile on each line (turned about it by `angle`).
+        #[serde(default, skip_serializing_if = "WeldLocate::is_centroid")]
+        locate: WeldLocate,
+        /// The profile mirrored about the axes through its located point.
+        #[serde(default, skip_serializing_if = "WeldMirror::is_none")]
+        mirror: WeldMirror,
+        /// How two members meeting at their ends are joined, where `joints` says nothing else.
+        #[serde(default, skip_serializing_if = "WeldCorner::is_mitre")]
+        corner: WeldCorner,
+        /// Further groups of skeleton lines, joined to the lines of `path` and to each other as
+        /// if one path; where members of two groups meet, the later group's corner joins them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        groups: Vec<WeldGroup>,
+        /// Joints joined otherwise than `corner`, by the two members' keys (see [`WeldGroup`]).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        joints: Vec<WeldJoint>,
+        /// The space left between a butting member's end and the face it butts against.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
+        /// Whether a member ending on a member of an earlier Structural Member feature (in the
+        /// same component) butts against it. The earlier member is left as it is.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        join_earlier: bool,
+        /// Whether skeleton lines and arcs that run on into each other (tangent, nothing else
+        /// meeting there) make one bent member, keyed by the first of them in key order;
+        /// otherwise each arc is a bent member of its own.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        merge_arcs: bool,
+        /// Stock added at each end of a bent member's cut length, trimmed off after bending: the
+        /// straight tails a roller leaves, or a bender's grip.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End allowance")]
+        end_allowance: Option<Expr>,
+    },
+    /// Weldment Trim/Extend: each member's end nearest the boundary cut back or lengthened to it,
+    /// the boundary being a plane, a planar face, or other members (their faces toward it).
+    WeldTrim {
+        members: Vec<BodyName>,
+        /// The boundary plane, when neither `face` nor `to` is given.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        plane: Option<PlaneRef>,
+        /// A planar face as the boundary (its plane).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        face: Option<FaceAt>,
+        /// Members as the boundary: each member ends against the face of the one nearest its end.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        to: Vec<BodyName>,
+        #[serde(default, skip_serializing_if = "WeldTrimMode::is_both")]
+        mode: WeldTrimMode,
+        /// The space left between each end and the boundary.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
+        /// With `to` members: each end coped to fit the outside of its boundary member, instead
+        /// of cut flat against its face.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        cope: bool,
+    },
+    /// Weldment End Cap: a plate closing each picked open end of a structural member, on its
+    /// end face (the profile's outline, set in by `inset`) or, `inside`, fitted into its hole.
+    WeldEndCap {
+        ends: Vec<WeldEndRef>,
+        #[walk(length = "Thickness")]
+        thickness: Expr,
+        /// How far the plate's edge is set in from the profile's outside (or its hole's side).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Inset")]
+        inset: Option<Expr>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        inside: bool,
+        /// The plate's sharp outside corners chamfered (the distance along each side) or filleted
+        /// (the radius) by `corner_size`.
+        #[serde(default, skip_serializing_if = "WeldCapCorner::is_square")]
+        corner: WeldCapCorner,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Corner size")]
+        corner_size: Option<Expr>,
+    },
+    /// Weldment Gusset: a flat plate in the corner between two members that meet, on the plane
+    /// of their skeleton lines, its legs along each member's face.
+    WeldGusset {
+        members: [BodyName; 2],
+        /// Leg length along the first member's face (and the second's, without `size2`).
+        #[walk(length = "Size")]
+        size: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Size 2")]
+        size2: Option<Expr>,
+        #[walk(length = "Thickness")]
+        thickness: Expr,
+        /// How far the plate's sides stand square off each member before its slanted edge
+        /// (none: a triangle).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Edge")]
+        edge: Option<Expr>,
+        /// The corner at the joint cut off this far along each face, to clear the weld there.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Clip")]
+        clip: Option<Expr>,
+        /// How far the plate is moved off the plane of the two lines, toward its `one` side.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset")]
+        offset: Option<Expr>,
+        /// Which side of that (offset) plane the plate's thickness lies on.
+        #[serde(default, skip_serializing_if = "WeldPlateSide::is_center")]
+        side: WeldPlateSide,
+        /// The leg along the first (second) member runs the other way along it from the joint:
+        /// the other corner, where that member runs through the joint.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse_first: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse_second: bool,
+    },
+    /// Weldment Weld Bead: a cosmetic weld (no material is added) along the seams where two
+    /// bodies meet, found from their faces, with what a weld table and a weld symbol need.
+    WeldBead {
+        bodies: [BodyName; 2],
+        /// A fillet's leg, or a groove weld's throat.
+        #[walk(length = "Size")]
+        size: Expr,
+        #[serde(default, skip_serializing_if = "WeldBeadKind::is_fillet")]
+        kind: WeldBeadKind,
+        /// Only the seams nearest these points (none: every seam the two bodies make).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        at: Vec<Position>,
+        /// How far apart the bodies may stand at a seam (a root gap the weld bridges).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
+        /// Intermittent: welds `length` long, one every `pitch` (centre to centre) along each
+        /// seam; without them the seams are welded end to end.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Length")]
+        length: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Pitch")]
+        pitch: Option<Expr>,
+        /// Welded on site rather than in the shop.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        field: bool,
+        /// Free text for the weld symbol's tail (a process, a specification).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
     },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
@@ -2121,6 +2509,14 @@ mod opt_point_expr {
 }
 
 impl FeatureKind {
+    /// A Structural Member's member keys, in order: its `path` lines, then each further group's
+    /// lines as `N:line` (`N` the group's number, from 2). Empty for other features.
+    pub fn weld_keys(&self) -> Vec<String> {
+        let FeatureKind::WeldMember { path, groups, .. } = self else { return Vec::new() };
+        let more = groups.iter().zip(1..).flat_map(|(g, n)| g.path.iter().map(move |l| crate::weld::member_key(n, l)));
+        path.iter().cloned().chain(more).collect()
+    }
+
     /// A sheet metal feature (its result depends on the sheet metal rules).
     pub fn is_plastic(&self) -> bool {
         matches!(self, FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. })
@@ -2176,6 +2572,11 @@ impl FeatureKind {
             FeatureKind::SurfaceOffset { .. } => "OffsetSurfaceFeature",
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
+            FeatureKind::WeldMember { .. } => "StructuralMemberFeature",
+            FeatureKind::WeldTrim { .. } => "TrimExtendFeature",
+            FeatureKind::WeldEndCap { .. } => "EndCapFeature",
+            FeatureKind::WeldGusset { .. } => "GussetFeature",
+            FeatureKind::WeldBead { .. } => "WeldBeadFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
             FeatureKind::Lip { groove: false, .. } => "LipFeature",
@@ -2256,6 +2657,11 @@ impl FeatureKind {
             FeatureKind::SurfaceOffset { .. } => "OffsetSurface",
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
+            FeatureKind::WeldMember { .. } => "StructuralMember",
+            FeatureKind::WeldTrim { .. } => "TrimExtend",
+            FeatureKind::WeldEndCap { .. } => "EndCap",
+            FeatureKind::WeldGusset { .. } => "Gusset",
+            FeatureKind::WeldBead { .. } => "WeldBead",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
             FeatureKind::Lip { groove: false, .. } => "Lip",
@@ -2458,6 +2864,16 @@ pub struct Document {
     /// Physical materials defined in this design (`material.create`), next to the built-in ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_materials: Vec<UserMaterial>,
+    /// Weldment cut list properties per body (by body name): description, free properties, left out.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub cut_list: std::collections::BTreeMap<String, CutListProps>,
+    /// Weldment sub-weldments: bodies listed in a cut list section of their own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sub_weldments: Vec<SubWeldment>,
+    /// Weldment stock lengths (mm) bought, by stock name (a library profile's or a profile
+    /// sketch's), over those its library profile gives.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub stock_lengths: std::collections::BTreeMap<String, Vec<f64>>,
     /// Appearance colour per body (by body name, sRGB); it overrides the material's look.
     #[serde(default, skip_serializing_if = "crate::appearance::Appearances::is_empty")]
     pub appearances: crate::appearance::Appearances,
@@ -2640,6 +3056,7 @@ impl Document {
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
             .chain(a.exploded.iter().map(|v| v.id))
+            .chain(self.sub_weldments.iter().map(|w| w.id))
             .max()
             .unwrap_or(0);
         let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
@@ -2677,6 +3094,9 @@ impl Document {
             body_offsets: Default::default(),
             materials: Default::default(),
             user_materials: Vec::new(),
+            cut_list: Default::default(),
+            sub_weldments: Vec::new(),
+            stock_lengths: Default::default(),
             appearances: Default::default(),
             favorites: Default::default(),
             canvases: Vec::new(),
@@ -2690,11 +3110,17 @@ impl Document {
     }
 
     /// Rename body `old` to `new` where the design keeps things by body name outside its
-    /// features: materials, appearances, configuration columns, offsets, components and the
+    /// features: materials, cut list properties and sub-weldments, appearances, configuration columns, offsets, components and the
     /// browser's groups and order. (The features are the rename command's to change.)
     pub fn rename_body_keys(&mut self, old: &str, new: &str) {
         if let Some(m) = self.materials.remove(old) {
             self.materials.insert(new.to_string(), m);
+        }
+        if let Some(c) = self.cut_list.remove(old) {
+            self.cut_list.insert(new.to_string(), c);
+        }
+        for b in self.sub_weldments.iter_mut().flat_map(|w| w.bodies.iter_mut()).filter(|b| *b == old) {
+            *b = new.to_string();
         }
         if let Some(c) = self.appearances.bodies.remove(old) {
             self.appearances.bodies.insert(new.to_string(), c);

@@ -70,7 +70,7 @@ fn read(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// A free property as it may be saved (`None`: remove it), or why not.
-fn property(name: &str, value: &Value, cmd: &str) -> Result<Option<String>> {
+pub(super) fn property(name: &str, value: &Value, cmd: &str) -> Result<Option<String>> {
     let shown: String = name.chars().take(64).collect();
     if name.trim().is_empty() || name.len() > MAX_PROPERTY_NAME_BYTES || name.chars().any(char::is_control) {
         return Err(bad(cmd, format!("property name `{shown}` must be 1…{MAX_PROPERTY_NAME_BYTES} bytes of text without control characters")));

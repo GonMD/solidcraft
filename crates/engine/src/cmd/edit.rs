@@ -997,6 +997,12 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if nf.kind.face_points() != f.kind.face_points() {
         nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component);
     }
+    // Structural members keep their names by skeleton line, not by place in the path.
+    if set.get("body_names").is_none()
+        && let Some(names) = super::weld::follow_lines(s, &f, &mut nf.kind, set.get("joints").is_none())
+    {
+        nf.body_names = names;
+    }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
     }
@@ -1169,6 +1175,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         .chain(super::surface::COMMANDS)
         .chain(super::surface_boundary::COMMANDS)
         .any(|candidate| candidate.id == spec.id)
+        || matches!(spec.id, "weld.member" | "weld.trim_extend" | "weld.end_cap" | "weld.gusset" | "weld.bead")
         || matches!(
             spec.id,
             "sheet.flange"
@@ -1271,8 +1278,14 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if made == s.doc.next_id && trial.doc.next_id == made.saturating_add(1) {
         trial.doc_mut().next_id = s.doc.next_id;
     }
+    // Structural members keep their names by skeleton line, not by place in the path.
+    // (The command's own joints are already keyed by its lines.)
+    let weld_names = super::weld::follow_lines(s, &old, &mut new.kind, false);
     if let Some(slot) = trial.doc_mut().feature_mut(id) {
         slot.suppressed = old.suppressed;
+        if let Some(names) = weld_names {
+            slot.body_names = names;
+        }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;
         slot.edge_names = new.edge_names;

@@ -38,6 +38,12 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
         Kind::Construct { command, .. } => Some(command),
+        Kind::WeldMember { .. } => Some("weld.member"),
+        Kind::WeldTrim { .. } => Some("weld.trim_extend"),
+        Kind::WeldEndCap { .. } => Some("weld.end_cap"),
+        Kind::WeldGusset { .. } => Some("weld.gusset"),
+        Kind::WeldBead { .. } => Some("weld.bead"),
+        Kind::CutList { .. } => Some("weld.cut_list"),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
         Kind::Split => Some("solid.split_body"),
         Kind::DeleteFaces => Some("face.delete"),
@@ -172,7 +178,17 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         ui_kit::text(ui, tr(key), ui_kit::Text::Hint("manage"));
     }
     placement_row(d, ui);
-    input_rows(d, ui, &app.session);
+    // A library profile takes the place of the picked sketch profile.
+    if let Kind::WeldMember { source, .. } = &mut d.kind {
+        crate::dialogs_weld::profile_source_row(ui, source);
+    }
+    if matches!(&d.kind, Kind::WeldMember { source, .. } if source.library) {
+        d.active = d.active.max(1);
+        let n = d.inputs.len();
+        input_rows_range(d, ui, &app.session, 1..n);
+    } else {
+        input_rows(d, ui, &app.session);
+    }
     match &mut d.kind {
         Kind::Material { index } => {
             let names = app.session.doc.material_names();
@@ -710,6 +726,23 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Stock { margin } => {
             enter |= expr_row(ui, "Margin", margin);
+        }
+        Kind::CutList { data, key, status, together, edit } => crate::dialogs_weld::cut_list_rows(app, ui, data, key, status, together, edit),
+        Kind::WeldMember { angle, place, corner, gap, join, source, groups, bends } => {
+            let picked = d.inputs.first().and_then(|inp| inp.items.profiles().first().copied());
+            let fields = (angle, place, corner, gap, join, source, groups, bends);
+            let editing = d.editing.map(|(id, _)| id);
+            enter |= crate::dialogs_weld::member_rows(app, ui, fields, picked, editing, &mut d.inputs, &mut d.active);
+        }
+        Kind::WeldTrim { mode, gap, cope } => enter |= crate::dialogs_weld::trim_rows(ui, mode, gap, cope),
+        Kind::WeldEndCap { thickness, inset, inside, corner, corner_size } => {
+            enter |= crate::dialogs_weld::end_cap_rows(ui, thickness, inset, inside, corner, corner_size)
+        }
+        Kind::WeldGusset { size, size2, thickness, edge, clip, offset, side, reverse } => {
+            enter |= crate::dialogs_weld::gusset_rows(ui, size, size2, thickness, edge, clip, offset, side, reverse);
+        }
+        Kind::WeldBead { size, kind, gap, intermittent, length, pitch, field, note } => {
+            enter |= crate::dialogs_weld::bead_rows(ui, size, kind, gap, intermittent, length, pitch, field, note);
         }
         Kind::Scale { factor } => {
             enter |= expr_row(ui, "Scale factor", factor);

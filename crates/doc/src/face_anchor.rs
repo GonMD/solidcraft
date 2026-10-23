@@ -423,7 +423,7 @@ pub fn validate_face_anchors_json(value: &Value) -> Result<()> {
                     validate_face_anchor_json(anchor)?;
                 }
                 for (key, child) in fields {
-                    if !["sketch", "meshes", "step", "configs", "appearances", "materials"].contains(&key.as_str())
+                    if !["sketch", "meshes", "step", "configs", "appearances", "materials", "cut_list"].contains(&key.as_str())
                         && matches!(child, Value::Array(_) | Value::Object(_))
                     {
                         stack.push((child, depth + 1));

@@ -718,6 +718,12 @@ pub struct ModelState {
     pub body_counter: usize,
     /// Sheet metal bodies (by body name) and their flat patterns.
     pub sheets: Vec<crate::sheet::SheetBody>,
+    /// Weldment members (by body name) as cut from stock, for the cut list.
+    pub welds: Vec<crate::weld::MemberCut>,
+    /// Weldment plates (End Caps, Gussets; by body name), for the cut list.
+    pub plates: Vec<crate::weld::PlateCut>,
+    /// Weld beads (cosmetic: the seams they weld), for the weld table and the view.
+    pub beads: Vec<crate::weld::Bead>,
     /// Construction planes, axes and points as evaluated (by feature).
     pub construct: Vec<crate::construct::Construct>,
     /// Evaluation-cache keys of the sketches (by sketch feature id).
@@ -736,7 +742,7 @@ pub struct ModelState {
 
 impl ModelState {
     /// A digest of everything later features can read: bodies (by content identity), sketches,
-    /// the body counter, threads and sheet bodies.
+    /// the body counter, threads, sheet bodies and weldment members.
     fn digest(&self) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for b in &self.bodies {
@@ -775,6 +781,9 @@ impl ModelState {
         }
         serde_json::to_string(&self.threads).unwrap_or_default().hash(&mut h);
         serde_json::to_string(&self.sheets).unwrap_or_default().hash(&mut h);
+        serde_json::to_string(&self.welds).unwrap_or_default().hash(&mut h);
+        serde_json::to_string(&self.plates).unwrap_or_default().hash(&mut h);
+        serde_json::to_string(&self.beads).unwrap_or_default().hash(&mut h);
         h.finish()
     }
 
@@ -969,7 +978,13 @@ impl ModelState {
     pub fn retained_bytes(&self) -> usize {
         let bodies: usize = self.bodies.iter().map(|b| if b.bytes > 0 { b.bytes } else { b.body.retained_bytes() }).sum();
         let sketches: usize = self.sketches.iter().map(|s| s.retained_bytes()).sum();
-        bodies + sketches + self.sheets.len() * 4096 + self.threads.len() * 192 + self.construct.len() * 192
+        bodies
+            + sketches
+            + self.sheets.len() * 4096
+            + (self.welds.len() + self.plates.len()) * 128
+            + self.beads.iter().map(|b| 192 + b.seams.iter().map(|s| s.len() * 24).sum::<usize>()).sum::<usize>()
+            + self.threads.len() * 192
+            + self.construct.len() * 192
     }
 
     pub fn body(&self, name: &str) -> Option<&ModelBody> {
@@ -1464,27 +1479,30 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         FeatureKind::Sweep { path_sketch, .. }
         | FeatureKind::SurfaceSweep { path_sketch, .. }
         | FeatureKind::Pipe { path_sketch, .. }
+        | FeatureKind::WeldMember { path_sketch, .. }
         | FeatureKind::Pattern { pattern: crate::PatternKind::Path { path_sketch, .. }, .. } => Some(*path_sketch),
         _ => None,
     };
     let wired = |id: &crate::SketchId| doc.sketch(id.0).is_ok_and(|sketch| !sketch.wires.is_empty());
-    let rails: &[crate::SweepRail] = match &f.kind {
+    // Further sketches the path's frame reads: rails, a structural member's groups.
+    let more: Vec<crate::SketchId> = match &f.kind {
         FeatureKind::Sweep { rails, .. }
         | FeatureKind::SurfaceSweep { rails, .. }
         | FeatureKind::Loft { rails, .. }
-        | FeatureKind::SurfaceLoft { rails, .. } => rails,
-        _ => &[],
+        | FeatureKind::SurfaceLoft { rails, .. } => rails.iter().map(|r| r.sketch).collect(),
+        FeatureKind::WeldMember { groups, .. } => groups.iter().map(|g| g.path_sketch).collect(),
+        _ => Vec::new(),
     };
-    if path.as_ref().is_some_and(wired) || rails.iter().any(|r| wired(&r.sketch)) {
+    if path.as_ref().is_some_and(wired) || more.iter().any(wired) {
         if let Some(path) = path {
             reads.sketch(doc, path.0);
         }
-        // A sweep's profile and the rails' components place them too.
+        // A sweep's profile and the rails' or groups' components place them too.
         let profile = match &f.kind {
             FeatureKind::Sweep { sketch, .. } | FeatureKind::SurfaceSweep { sketch, .. } => Some(sketch),
             _ => None,
         };
-        for sketch in profile.into_iter().chain(rails.iter().map(|r| &r.sketch)) {
+        for sketch in profile.into_iter().chain(more.iter()) {
             reads.sketch(doc, sketch.0);
         }
     }
@@ -2028,6 +2046,16 @@ impl Model {
                         b.name = new.to_string();
                         b.names = b.names.renamed();
                     }
+                    // A weldment member or plate is recorded under its body's name.
+                    for w in st.welds.iter_mut().filter(|w| w.body == old) {
+                        w.body = new.to_string();
+                    }
+                    for p in st.plates.iter_mut().filter(|p| p.body == old) {
+                        p.body = new.to_string();
+                    }
+                    for n in st.beads.iter_mut().flat_map(|b| b.bodies.iter_mut()).filter(|n| *n == old) {
+                        *n = new.to_string();
+                    }
                     Arc::new(st)
                 })
                 .clone();
@@ -2256,6 +2284,7 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
             | FeatureKind::BodyTransfer { .. }
             | FeatureKind::SplitFace { .. }
             | FeatureKind::Thread { modeled: false, .. }
+            | FeatureKind::WeldBead { .. }
     ) {
         return;
     }
@@ -2516,6 +2545,10 @@ fn apply_traced(state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Ope
                 state.bodies.retain(|b| !absorbed.contains(&b.name));
                 for t in state.threads.iter_mut().filter(|t| absorbed.contains(&t.body)) {
                     t.body = keep.clone();
+                }
+                // A bead between bodies now joined into one stays as it was welded.
+                for n in state.beads.iter_mut().flat_map(|b| b.bodies.iter_mut()).filter(|n| absorbed.contains(n.as_str())) {
+                    *n = keep.clone();
                 }
                 live.retain(|n| !absorbed.contains(n));
             }
@@ -5426,6 +5459,12 @@ mod more;
 pub use model_cache::SavedModel;
 #[path = "eval_surface.rs"]
 mod surface;
+#[path = "eval_weld.rs"]
+mod weld;
+#[path = "eval_weld_bead.rs"]
+mod weld_bead;
+pub use weld::MAX_MEMBERS as MAX_WELD_MEMBERS;
+pub use weld::{WeldCornerAt, corners as weld_corners, member_keys as weld_member_keys};
 
 /// Height above `plane` (along its normal) of the object at `p` as seen from `centre`: the face
 /// there if it is planar and parallel (its plane), else where a ray from `centre` along the
@@ -5820,6 +5859,11 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::ReplaceFace { .. }
         | FeatureKind::Align { .. }
         | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st),
+        FeatureKind::WeldMember { .. } => weld::eval(doc, vals, f, st, warning),
+        FeatureKind::WeldTrim { .. } => weld::trim(doc, vals, f, st, warning),
+        FeatureKind::WeldEndCap { .. } => weld::end_cap(vals, f, st),
+        FeatureKind::WeldGusset { .. } => weld::gusset(vals, f, st),
+        FeatureKind::WeldBead { .. } => weld_bead::bead(vals, f, st),
         FeatureKind::Sketch { plane, sketch } => {
             let anchor = crate::face_anchor::plane_face_anchor(plane);
             let fst = match anchor {
@@ -7079,6 +7123,27 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
                 t2.axis_point = crate::apply_point(&frame, t.axis_point);
                 t2.axis = crate::apply_vector(&frame, *t.axis).unit().unwrap_or(t.axis);
                 out.threads.push(t2);
+            }
+            // A bead is drawn where its first body is placed.
+            for bead in st.beads.iter().filter(|x| {
+                x.bodies.first().and_then(|n| st.body(n)).map(|body| doc.model_body_component(body)).unwrap_or_else(|| comp_of_feature(x.feature))
+                    == comp
+            }) {
+                let mut b2 = bead.clone();
+                let frame = bead
+                    .bodies
+                    .first()
+                    .and_then(|n| st.body(n))
+                    .and_then(|body| doc.model_body_offset(body))
+                    .map(|offset| crate::mat_mul(&m, offset))
+                    .unwrap_or(m);
+                for p in b2.seams.iter_mut().flatten() {
+                    *p = crate::apply_point(&frame, *p);
+                }
+                for n in &mut b2.bodies {
+                    *n = doc.world_body_name(st, n, comp, &path);
+                }
+                out.beads.push(b2);
             }
         }
     }

@@ -207,6 +207,32 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("import", json!({"type": "import", "file": "a.step", "step": ""})),
         ("mesh_convert", json!({"type": "mesh_convert", "body": "B", "tolerance": "mesh_convert.tolerance"})),
         ("mesh_import", json!({"type": "mesh_import", "file": "a.stl", "meshes": []})),
+        (
+            "weld_member",
+            json!({"type": "weld_member", "sketch": 1, "profiles": {"type": "all"}, "path_sketch": 2, "path": ["l1"], "angle": "member.angle",
+                "corner": "butt", "groups": [{"path_sketch": 3, "path": ["l1"], "angle": "member.group_angle", "corner": "mitre"}],
+                "joints": [{"members": ["l1", "2:l1"], "corner": "mitre"}], "gap": "member.gap", "end_allowance": "member.end_allowance"}),
+        ),
+        (
+            "weld_trim",
+            json!({"type": "weld_trim", "members": ["B"], "plane": plane("weld_trim"), "face": {"body": "B", "point": [1, 0, 0]}, "to": ["B"],
+                "mode": "trim", "gap": "weld_trim.gap", "cope": true}),
+        ),
+        (
+            "weld_end_cap",
+            json!({"type": "weld_end_cap", "ends": [{"member": "B", "end": "end"}], "thickness": "end_cap.thickness", "inset": "end_cap.inset",
+                "inside": true}),
+        ),
+        (
+            "weld_gusset",
+            json!({"type": "weld_gusset", "members": ["B", "B"], "size": "gusset.size", "size2": "gusset.size2", "thickness": "gusset.thickness",
+                "edge": "gusset.edge", "clip": "gusset.clip", "offset": "gusset.offset"}),
+        ),
+        (
+            "weld_bead",
+            json!({"type": "weld_bead", "bodies": ["B", "B"], "size": "bead.size", "kind": "groove", "at": [[5, 0, 0]], "gap": "bead.gap",
+                "length": "bead.length", "pitch": "bead.pitch", "field": true, "note": "GMAW"}),
+        ),
     ]
 }
 

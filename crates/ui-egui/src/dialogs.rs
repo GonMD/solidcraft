@@ -211,6 +211,75 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Halfway between two planes or planar faces.
             Midplane,
+            /// The weldment cut list (read only), refreshed when the design changes.
+            CutList {
+                data: Option<Result<Value, String>>,
+                /// What `data` was read for: the design's revision and the parameters.
+                key: Option<(u64, Value)>,
+                status: Option<String>,
+                /// Mirror-image members in one row (`mirrors: together`).
+                together: bool,
+                /// The item whose description and properties are being edited.
+                edit: crate::dialogs_weld::CutEdit,
+            },
+            /// Weldment Trim/Extend: members' ends moved onto a boundary.
+            WeldTrim {
+                /// 0 both, 1 trim, 2 extend.
+                mode: usize,
+                gap: String,
+                /// Ends coped to fit boundary members.
+                cope: bool,
+            },
+            /// Weldment End Cap: a plate on (or in) each picked member end.
+            WeldEndCap {
+                thickness: String,
+                inset: String,
+                inside: bool,
+                /// 0 square, 1 chamfer, 2 fillet.
+                corner: usize,
+                corner_size: String,
+            },
+            /// Weldment Gusset: a plate in the corner between two members.
+            WeldGusset {
+                size: String,
+                size2: String,
+                thickness: String,
+                edge: String,
+                clip: String,
+                offset: String,
+                /// 0 centred, 1 one side, 2 the other.
+                side: usize,
+                /// Each member's leg runs the other way from the joint.
+                reverse: [bool; 2],
+            },
+            /// Weldment Weld Bead: a cosmetic weld along the seams between two bodies.
+            WeldBead {
+                size: String,
+                /// 0 fillet, 1 groove.
+                kind: usize,
+                gap: String,
+                intermittent: bool,
+                length: String,
+                pitch: String,
+                field: bool,
+                note: String,
+            },
+            /// Weldment structural members: a profile along each skeleton line or arc.
+            WeldMember {
+                angle: String,
+                /// The profile's located point and mirror.
+                place: crate::dialogs_weld::Place,
+                /// 0 mitre, 1 butt.
+                corner: usize,
+                gap: String,
+                /// Members ending on an earlier feature's members butt against them.
+                join: bool,
+                /// A sketch profile or a library one.
+                source: crate::dialogs_weld::ProfileSource,
+                /// Further groups of skeleton lines (their inputs follow the Skeleton's).
+                groups: crate::dialogs_weld::Groups,
+                bends: crate::dialogs_weld::Bends,
+            },
             /// An imported mesh body rebuilt as editable faces (#3001).
             MeshConvert {
                 tolerance: String,
@@ -674,6 +743,54 @@ impl Dialog {
                 Kind::PathPattern { count: "4".into(), spacing: "20 mm".into() },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
             ),
+            "weld.cut_list" => Dialog::new(Kind::CutList { data: None, key: None, status: None, together: false, edit: Default::default() }, vec![]),
+            "weld.member" => Dialog::new(
+                Kind::WeldMember {
+                    angle: "0 deg".into(),
+                    place: Default::default(),
+                    corner: 0,
+                    gap: String::new(),
+                    join: true,
+                    source: Default::default(),
+                    groups: Default::default(),
+                    bends: Default::default(),
+                },
+                vec![SelInput::new("Profile", PROFILES, false), SelInput::new("Skeleton", CURVES, true)],
+            ),
+            "weld.trim_extend" => Dialog::new(
+                Kind::WeldTrim { mode: 0, gap: String::new(), cope: false },
+                vec![SelInput::new("Members", BODIES, true), SelInput::new("Boundary", BODIES | PLANES | PLANAR_FACES, true)],
+            ),
+            "weld.end_cap" => Dialog::new(
+                Kind::WeldEndCap { thickness: "5 mm".into(), inset: String::new(), inside: false, corner: 0, corner_size: String::new() },
+                vec![SelInput::new("Ends", PLANAR_FACES, true)],
+            ),
+            "weld.gusset" => Dialog::new(
+                Kind::WeldGusset {
+                    size: "100 mm".into(),
+                    size2: String::new(),
+                    thickness: "6 mm".into(),
+                    edge: String::new(),
+                    clip: String::new(),
+                    offset: String::new(),
+                    side: 0,
+                    reverse: [false; 2],
+                },
+                vec![SelInput::new("Members", BODIES, true)],
+            ),
+            "weld.bead" => Dialog::new(
+                Kind::WeldBead {
+                    size: "5 mm".into(),
+                    kind: 0,
+                    gap: String::new(),
+                    intermittent: false,
+                    length: "50 mm".into(),
+                    pitch: "150 mm".into(),
+                    field: false,
+                    note: String::new(),
+                },
+                vec![SelInput::new("Bodies", BODIES, true), SelInput::new("Seams", EDGES, true)],
+            ),
             "mesh.convert" => Dialog::new(Kind::MeshConvert { tolerance: "0.05 mm".into() }, vec![SelInput::new("Mesh body", BODIES, false)]),
             "construct.plane.midplane" => Dialog::new(
                 Kind::Midplane,
@@ -953,6 +1070,11 @@ impl Dialog {
                 | Kind::Remove
                 | Kind::PathPattern { .. }
                 | Kind::Pipe { .. }
+                | Kind::WeldMember { .. }
+                | Kind::WeldTrim { .. }
+                | Kind::WeldEndCap { .. }
+                | Kind::WeldGusset { .. }
+                | Kind::WeldBead { .. }
                 | Kind::Stock { .. }
                 | Kind::Scale { .. }
                 | Kind::OffsetFaces { .. }
@@ -1011,6 +1133,7 @@ impl Dialog {
             Kind::Emboss { depth, .. } => ("Depth", ValueKind::Length, depth),
             Kind::PathPattern { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::Pipe { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
+            Kind::WeldMember { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Stock { margin } => ("Margin", ValueKind::Length, margin),
             Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Scale { factor } => ("Scale", ValueKind::Unitless, factor),
@@ -1025,6 +1148,16 @@ impl Dialog {
 
     pub fn wants_picks(&self) -> bool {
         !self.inputs.is_empty()
+    }
+
+    /// The sketch whose points a click takes as a Structural Member's located point, while its
+    /// dialog picks one (Pick in view): the picked sketch profile's.
+    pub fn locate_pick_sketch(&self) -> Option<u64> {
+        let Kind::WeldMember { place, source, .. } = &self.kind else { return None };
+        if !place.picking || source.library {
+            return None;
+        }
+        self.inputs.first().and_then(|inp| inp.items.profiles().first().map(|(sketch, _)| *sketch))
     }
 
     pub fn active_input(&self) -> Option<&SelInput> {
@@ -1117,6 +1250,13 @@ impl Dialog {
     pub(crate) fn candidate_on(&self, s: &Session, h: &Hit, snap: Option<&FaceSnap>) -> Option<Sel> {
         if matches!(self.kind, Kind::SketchModify(_)) {
             return crate::sketch_modify_ui::candidate(self, s, h);
+        }
+        // A Structural Member's located point: a point of its profile's sketch, and nothing else.
+        if let Some(profile) = self.locate_pick_sketch() {
+            return match h {
+                Hit::SketchPoint { sketch, id, .. } if *sketch == profile => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
+                _ => None,
+            };
         }
         let inp = self.active_input()?;
         // Features are also picked on the canvas: a face stands for the feature that made it.
@@ -1703,6 +1843,12 @@ fn title(k: &Kind) -> &'static str {
         Kind::Text(_) => "EDIT TEXT",
         Kind::TextMove(_) => "MOVE/COPY TEXT",
         Kind::SketchModify(k) => k.title(),
+        Kind::WeldMember { .. } => "STRUCTURAL MEMBER",
+        Kind::WeldTrim { .. } => "TRIM/EXTEND",
+        Kind::WeldEndCap { .. } => "END CAP",
+        Kind::WeldGusset { .. } => "GUSSET",
+        Kind::WeldBead { .. } => "WELD BEAD",
+        Kind::CutList { .. } => "CUT LIST",
         _ => k.simple_metadata().map_or("", |(_, title)| title),
     }
 }
@@ -2343,7 +2489,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::new(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
-    let panel = if matches!(d.kind, Kind::Appearance(_)) {
+    // Structural Member: its Corners rows name two members and a member running through; Cut
+    // List: each item's description and length.
+    let panel = if matches!(d.kind, Kind::Appearance(_) | Kind::WeldMember { .. } | Kind::CutList { .. }) {
         panel.width(t.form_card_width + t.form_label_width + t.space_6)
     } else if wide {
         let panel = panel.wide();
@@ -3510,6 +3658,121 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             put(&mut p, &[("wall", wall)]);
             ("solid.pipe", p)
         }
+        Kind::WeldMember { angle, place, corner, gap, join, source, groups, bends } => {
+            if !source.library {
+                need(0, "a profile")?;
+            }
+            need(1, "the skeleton lines")?;
+            let (sketch, idx) = profiles();
+            let hint = if source.library { None } else { sketch.as_u64() };
+            let corner = if *corner == 1 { "butt" } else { "mitre" };
+            let mut p = json!({"angle": angle, "corner": corner, "join_earlier": join});
+            if let Some(l) = place.locate_param() {
+                p["locate"] = l;
+            }
+            if let Some(m) = place.mirror_param() {
+                p["mirror"] = m;
+            }
+            if let Value::Object(m) = &mut p {
+                m.extend(crate::dialogs_weld::skeleton_params(app, &d.inputs, groups, hint)?);
+            }
+            if source.library {
+                p["stock"] = source.chosen.clone().ok_or("choose a library profile first")?;
+            } else {
+                p["sketch"] = sketch;
+                p["profiles"] = idx;
+            }
+            put(&mut p, &[("gap", gap), ("end_allowance", &bends.allowance)]);
+            if !bends.merge {
+                p["merge_arcs"] = json!(false);
+            }
+            ("weld.member", p)
+        }
+        Kind::WeldTrim { mode, gap, cope } => {
+            need(0, "the members")?;
+            need(1, "a boundary")?;
+            let mode = ["both", "trim", "extend"].get(*mode).copied().unwrap_or("both");
+            let mut p = json!({"members": sels(d, 0).body_names(), "mode": mode});
+            if *cope {
+                p["cope"] = json!(true);
+            }
+            match sels(d, 1) {
+                [Sel::Plane { name }] => p["plane"] = json!(name),
+                [Sel::Face { body, point, .. }] => p["face"] = json!({"body": body, "point": [point.x, point.y, point.z]}),
+                picks if picks.iter().all(|x| matches!(x, Sel::Body { .. })) => p["to"] = json!(sels(d, 1).body_names()),
+                _ => return Err("pick one plane or face, or members, as the boundary".into()),
+            }
+            put(&mut p, &[("gap", gap)]);
+            ("weld.trim_extend", p)
+        }
+        Kind::WeldEndCap { thickness, inset, inside, corner, corner_size } => {
+            need(0, "the member ends")?;
+            let faces: Vec<Value> = sels(d, 0)
+                .iter()
+                .filter_map(|x| match x {
+                    Sel::Face { body, point, .. } => Some(json!({"body": body, "point": [point.x, point.y, point.z]})),
+                    _ => None,
+                })
+                .collect();
+            let mut p = json!({"faces": faces, "thickness": thickness, "inside": inside});
+            put(&mut p, &[("inset", inset)]);
+            if let Some(kind) = ["chamfer", "fillet"].get(corner.wrapping_sub(1)) {
+                if corner_size.trim().is_empty() {
+                    return Err("enter the corner size".into());
+                }
+                p["corner"] = json!(kind);
+                p["corner_size"] = json!(corner_size);
+            }
+            ("weld.end_cap", p)
+        }
+        Kind::WeldGusset { size, size2, thickness, edge, clip, offset, side, reverse } => {
+            let members = sels(d, 0).body_names();
+            if members.len() != 2 {
+                return Err("pick the two members the gusset joins".into());
+            }
+            let mut p = json!({"members": members, "size": size, "thickness": thickness});
+            put(&mut p, &[("size2", size2), ("edge", edge), ("clip", clip), ("offset", offset)]);
+            p["side"] = json!(["center", "one", "other"].get(*side).copied().unwrap_or("center"));
+            for (key, value) in ["reverse_first", "reverse_second"].into_iter().zip(reverse) {
+                if *value {
+                    p[key] = json!(true);
+                }
+            }
+            ("weld.gusset", p)
+        }
+        Kind::WeldBead { size, kind, gap, intermittent, length, pitch, field, note } => {
+            let bodies = sels(d, 0).body_names();
+            if bodies.len() != 2 {
+                return Err("pick the two bodies the bead welds".into());
+            }
+            let mut p = json!({"bodies": bodies, "size": size});
+            if *kind == 1 {
+                p["kind"] = json!("groove");
+            }
+            put(&mut p, &[("gap", gap)]);
+            if *intermittent {
+                p["length"] = json!(length);
+                p["pitch"] = json!(pitch);
+            }
+            // Picked seams by a point on each picked edge.
+            let at: Vec<Value> = sels(d, 1)
+                .iter()
+                .filter_map(|x| match x {
+                    Sel::Edge { point, .. } => Some(json!([point.x, point.y, point.z])),
+                    _ => None,
+                })
+                .collect();
+            if !at.is_empty() {
+                p["at"] = json!(at);
+            }
+            if *field {
+                p["field"] = json!(true);
+            }
+            if !note.trim().is_empty() {
+                p["note"] = json!(note.trim());
+            }
+            ("weld.bead", p)
+        }
         Kind::Stock { .. } => {
             let mut p = json!({});
             if !sels(d, 0).is_empty() {
@@ -3724,7 +3987,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::ConfirmDelete { features, .. } => ("timeline.delete", json!({ "features": features })),
-        Kind::Sketch | Kind::Measure { .. } => return Ok(Vec::new()),
+        Kind::Sketch | Kind::Measure { .. } | Kind::CutList { .. } => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),
         Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),
@@ -4776,6 +5039,199 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("operation".into(), json!(OPS.get(op_index(operation)).copied().unwrap_or("new")));
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
+            }
+            d
+        }
+        FeatureKind::WeldMember {
+            sketch,
+            profiles,
+            stock,
+            path_sketch,
+            path,
+            angle,
+            locate,
+            mirror,
+            corner,
+            groups,
+            gap,
+            join_earlier,
+            merge_arcs,
+            end_allowance,
+            ..
+        } => {
+            let mut d = start("weld.member")?;
+            d.kind = Kind::WeldMember {
+                angle: angle.as_deref().map_or_else(|| "0 deg".to_string(), str::to_string),
+                place: crate::dialogs_weld::Place::of(*locate, *mirror),
+                corner: usize::from(*corner == solidcraft_engine::doc::WeldCorner::Butt),
+                gap: gap.as_deref().map(str::to_string).unwrap_or_default(),
+                join: *join_earlier,
+                bends: crate::dialogs_weld::Bends { merge: *merge_arcs, allowance: end_allowance.as_deref().map(str::to_string).unwrap_or_default() },
+                // The member keeps its copy of a library profile unless another is chosen.
+                source: crate::dialogs_weld::ProfileSource {
+                    library: stock.is_some(),
+                    chosen: stock.as_ref().and_then(|s| serde_json::to_value(s).ok()),
+                    ..Default::default()
+                },
+                groups: crate::dialogs_weld::Groups {
+                    rows: groups
+                        .iter()
+                        .map(|g| crate::dialogs_weld::GroupRow {
+                            angle: g.angle.as_deref().map(str::to_string).unwrap_or_default(),
+                            corner: match g.corner {
+                                None => 0,
+                                Some(solidcraft_engine::doc::WeldCorner::Mitre) => 1,
+                                Some(solidcraft_engine::doc::WeldCorner::Butt) => 2,
+                            },
+                            ..crate::dialogs_weld::GroupRow::of_place(g.locate, g.mirror)
+                        })
+                        .collect(),
+                    sketches: std::iter::once(path_sketch).chain(groups.iter().map(|g| &g.path_sketch)).map(|s| Some(s.0)).collect(),
+                    joints: crate::dialogs_weld::LineJoint::of(&f.kind),
+                    corners: None,
+                    hovered: None,
+                },
+            };
+            if let (Some(sketch), Some(profiles)) = (sketch, profiles)
+                && let Some(inp) = d.inputs.get_mut(0)
+            {
+                let items = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+                inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
+            }
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = path.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+            }
+            for (n, g) in groups.iter().enumerate().take(crate::dialogs_weld::MAX_GROUPS) {
+                let mut inp = crate::dialogs_weld::group_input(n);
+                inp.items = g.path.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect();
+                d.inputs.push(inp);
+            }
+            d
+        }
+        FeatureKind::WeldTrim { members, plane, face, to, mode, gap, cope } => {
+            let mut d = start("weld.trim_extend")?;
+            d.kind = Kind::WeldTrim {
+                mode: match mode {
+                    solidcraft_engine::doc::WeldTrimMode::Both => 0,
+                    solidcraft_engine::doc::WeldTrimMode::Trim => 1,
+                    solidcraft_engine::doc::WeldTrimMode::Extend => 2,
+                },
+                gap: gap.as_deref().map(str::to_string).unwrap_or_default(),
+                cope: *cope,
+            };
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = members.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
+            }
+            let boundary: Vec<Sel> = if !to.is_empty() {
+                to.iter().map(|n| Sel::Body { name: n.to_string() }).collect()
+            } else if let Some(fa) = face {
+                face_sel(s, fa.point.0).into_iter().collect()
+            } else {
+                plane.as_ref().and_then(|pl| plane_sel(s, pl)).into_iter().collect()
+            };
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = boundary;
+            }
+            d
+        }
+        FeatureKind::WeldEndCap { ends, thickness, inset, inside, corner, corner_size } => {
+            let mut d = start("weld.end_cap")?;
+            d.kind = Kind::WeldEndCap {
+                thickness: thickness.to_string(),
+                inset: inset.as_deref().map(str::to_string).unwrap_or_default(),
+                inside: *inside,
+                corner: match corner {
+                    solidcraft_engine::doc::WeldCapCorner::Square => 0,
+                    solidcraft_engine::doc::WeldCapCorner::Chamfer => 1,
+                    solidcraft_engine::doc::WeldCapCorner::Fillet => 2,
+                },
+                corner_size: corner_size.as_deref().map(str::to_string).unwrap_or_default(),
+            };
+            // Each end picked again by a point on its face, as the members are before this feature.
+            let before = s.model.state_before(id);
+            let items = ends
+                .iter()
+                .filter_map(|e| {
+                    let w = before.welds.iter().find(|w| w.body == e.member.0)?;
+                    let point = w.end_point(e.end.index())?;
+                    let index = solidcraft_engine::doc::appearance::face_index_at(before.body(&w.body)?, point)?;
+                    Some(Sel::Face { body: w.body.clone(), index, point })
+                })
+                .collect();
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = items;
+            }
+            d
+        }
+        FeatureKind::WeldGusset { members, size, size2, thickness, edge, clip, offset, side, reverse_first, reverse_second } => {
+            let mut d = start("weld.gusset")?;
+            let text = |e: &Option<solidcraft_engine::doc::Expr>| e.as_deref().map(str::to_string).unwrap_or_default();
+            let side = match side {
+                solidcraft_engine::doc::WeldPlateSide::Center => 0,
+                solidcraft_engine::doc::WeldPlateSide::One => 1,
+                solidcraft_engine::doc::WeldPlateSide::Other => 2,
+            };
+            d.kind = Kind::WeldGusset {
+                size: size.to_string(),
+                size2: text(size2),
+                thickness: thickness.to_string(),
+                edge: text(edge),
+                clip: text(clip),
+                offset: text(offset),
+                side,
+                reverse: [*reverse_first, *reverse_second],
+            };
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = members.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
+            }
+            d
+        }
+        FeatureKind::WeldBead { bodies, size, kind, at, gap, length, pitch, field, note } => {
+            let mut d = start("weld.bead")?;
+            let text = |e: &Option<solidcraft_engine::doc::Expr>| e.as_deref().map(str::to_string).unwrap_or_default();
+            d.kind = Kind::WeldBead {
+                size: size.to_string(),
+                kind: usize::from(*kind == solidcraft_engine::doc::WeldBeadKind::Groove),
+                gap: text(gap),
+                intermittent: length.is_some(),
+                length: length.as_deref().map_or_else(|| "50 mm".into(), str::to_string),
+                pitch: pitch.as_deref().map_or_else(|| "150 mm".into(), str::to_string),
+                field: *field,
+                note: note.clone().unwrap_or_default(),
+            };
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
+            }
+            // Each picked seam again as the nearest edge of either body, as they are before this feature.
+            let before = s.model.state_before(id);
+            let items = at
+                .iter()
+                .filter_map(|p| {
+                    bodies
+                        .iter()
+                        .filter_map(|n| before.body(&n.0))
+                        .filter_map(|b| {
+                            let m = b.mesh();
+                            m.edges
+                                .iter()
+                                .enumerate()
+                                .map(|(i, e)| {
+                                    (
+                                        i,
+                                        e.windows(2)
+                                            .map(|w| if let [a, b] = w { p.0.dist_to_segment(*a, *b) } else { f64::INFINITY })
+                                            .fold(f64::INFINITY, f64::min),
+                                    )
+                                })
+                                .min_by(|x, y| x.1.total_cmp(&y.1))
+                                .map(|(i, dist)| (dist, Sel::Edge { body: b.name.clone(), index: i, point: p.0 }))
+                        })
+                        .min_by(|x, y| x.0.total_cmp(&y.0))
+                        .map(|(_, sel)| sel)
+                })
+                .collect();
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = items;
             }
             d
         }

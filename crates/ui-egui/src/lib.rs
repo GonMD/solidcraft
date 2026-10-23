@@ -46,6 +46,7 @@ pub mod dialogs_surface;
 pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_view_dxf;
+pub mod dialogs_weld;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -242,6 +243,8 @@ mod ui_kit_guard_tests;
 pub mod update;
 pub mod viewport;
 mod viewport_layout;
+#[cfg(test)]
+mod weld_dialog_tests;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -259,7 +262,7 @@ pub use control::{ControlRequest, ControlResponse};
 pub struct UiState {
     /// Effective shell mode; automation can override the saved preference for this session.
     pub layout: shell::LayoutMode,
-    /// Ribbon tab; SHEET METAL and the contextual SKETCH join the seven design tabs.
+    /// Ribbon tab; SHEET METAL, the contextual SKETCH and WELDMENT join the seven design tabs.
     pub tab: String,
     /// Last contextual body/sketch, only used to select on entry.
     #[serde(skip)]

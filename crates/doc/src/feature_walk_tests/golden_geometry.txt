@@ -192,3 +192,11 @@ move
 import
 mesh_convert
 mesh_import
+weld_member
+  profiles: 1 all
+weld_trim
+  moves: face.point[1], face.point[2], plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
+weld_end_cap
+weld_gusset
+weld_bead
+  moves: at[0][0], at[0][1], at[0][2]

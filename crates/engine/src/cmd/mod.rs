@@ -88,6 +88,20 @@ mod surface_boundary;
 mod surface_match;
 mod view_dxf;
 mod view_navigation;
+mod weld;
+#[cfg(test)]
+mod weld_cut_props_tests;
+#[cfg(test)]
+mod weld_group_tests;
+mod weld_library;
+#[cfg(test)]
+mod weld_library_tests;
+#[cfg(test)]
+mod weld_parts_tests;
+#[cfg(test)]
+mod weld_tests;
+#[cfg(test)]
+mod weld_trim_tests;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -277,6 +291,8 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
+    v.extend(weld::COMMANDS.iter());
+    v.extend(weld_library::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());

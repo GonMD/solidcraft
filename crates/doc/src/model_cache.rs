@@ -186,6 +186,8 @@ impl Writer {
             "sketch_keys": st.sketch_keys.iter().map(|(f, k)| json!([f, hex(*k)])).collect::<Vec<_>>(),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
             "tapered": serde_json::to_value(&st.tapered).ok()?,
+            "welds": serde_json::to_value(&st.welds).ok()?, "plates": serde_json::to_value(&st.plates).ok()?,
+            "beads": serde_json::to_value(&st.beads).ok()?,
         });
         self.states.push(r);
         self.state_index.insert(id, self.states.len() - 1);
@@ -327,6 +329,10 @@ impl SavedModel {
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
                 tapered: serde_json::from_value(field("tapered")?).map_err(invalid)?,
+                // Weldment members, plates and beads; a cache saved before them has none.
+                welds: s.get("welds").map(|v| serde_json::from_value(v.clone())).transpose().map_err(invalid)?.unwrap_or_default(),
+                plates: s.get("plates").map(|v| serde_json::from_value(v.clone())).transpose().map_err(invalid)?.unwrap_or_default(),
+                beads: s.get("beads").map(|v| serde_json::from_value(v.clone())).transpose().map_err(invalid)?.unwrap_or_default(),
             };
             held = held.saturating_add(st.bodies.len()).saturating_add(st.sketches.len());
             if held > MAX_HELD {

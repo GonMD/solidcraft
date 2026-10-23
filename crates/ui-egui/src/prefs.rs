@@ -291,6 +291,26 @@ fn window_page<const INDEX: usize>(ui: &mut egui::Ui, app: &mut SolveApp) {
     page(app, ui, &Tokens::get());
 }
 
+/// The most a cut-list tolerance can be (`weld.cut_list` refuses more).
+pub const CUT_LIST_TOLERANCE_MAX: f64 = 1000.0;
+/// The widest saw kerf (mm) the cut list takes.
+pub const KERF_MAX: f64 = 100.0;
+
+/// The cut list's tolerances from the preferences, as `weld.cut_list` parameters; a value a
+/// hand-edited settings file made unusable falls back to its default.
+pub fn cut_list_tolerances(app: &SolveApp) -> serde_json::Value {
+    let d = Prefs::default();
+    let ok = |v: f64, default: f64| if v.is_finite() && (0.0..=CUT_LIST_TOLERANCE_MAX).contains(&v) { v } else { default };
+    serde_json::json!({
+        "length_tolerance": ok(app.preferences.cut_list_length_tolerance, d.cut_list_length_tolerance),
+        "angle_tolerance": ok(app.preferences.cut_list_angle_tolerance, d.cut_list_angle_tolerance),
+        "kerf": if app.preferences.cut_list_kerf.is_finite() && (0.0..=KERF_MAX).contains(&app.preferences.cut_list_kerf) {
+            app.preferences.cut_list_kerf
+        } else {
+            d.cut_list_kerf
+        },
+    })
+}
 pub const THEMES: [(&str, &str); 3] = [("dark", "Dark"), ("light", "Light"), ("system", "System")];
 pub const MSAA: [u32; 4] = [1, 2, 4, 8];
 /// Supersampling factors (#1288): off, 1.5× and 2× the viewport's pixels each way.
@@ -534,6 +554,12 @@ preference_settings! {
     auto_stand_up: bool = true, PAGE_DESIGN => check("Stand up Y-up files automatically", "A STEP or IGES file from a program that saves Y up opens standing, with Undo in the message");
     /// After a STEP or IGES file opens, offer to stand a Y-up part up (`stand_up`).
     offer_stand_up: bool = true, PAGE_DESIGN => check("Offer to stand up Y-up files", "After a STEP or IGES file opens with Z up, offer a quarter turn about X");
+    /// The Cut List's tolerances: members whose lengths (mm) and end angles (degrees) differ by
+    /// no more than these share a row.
+    cut_list_length_tolerance: f64 = 0.1, PAGE_DESIGN;
+    cut_list_angle_tolerance: f64 = 0.05, PAGE_DESIGN;
+    /// The saw kerf (mm) the Cut List leaves between pieces cut from one bar of stock.
+    cut_list_kerf: f64 = 3.0, PAGE_DESIGN;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
     /// Colour vision mode (#778): `off`, `protan`, `deutan` or `tritan`.
@@ -1624,6 +1650,44 @@ mod tests {
         defaults(&mut app, PAGE_SKETCH);
         assert!(!app.ui.pick_bodies);
         assert!(app.session.auto_project);
+    }
+
+    /// The Cut List dialog reads with the tolerances from the preferences: two members 0.3 mm
+    /// apart are two rows at the default 0.1 mm and one at 0.5 mm; Restore Defaults puts them
+    /// back, and a value no command takes falls back to the default.
+    #[test]
+    fn the_cut_list_uses_the_tolerance_preferences() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        for (cmd, p) in [
+            ("sketch.create", json!({"plane": "YZ", "name": "Tube"})),
+            ("sketch.line", json!({"points": [[-25, -25], [25, -25], [25, 25], [-25, 25]], "closed": true})),
+            ("sketch.finish", json!({})),
+            ("sketch.create", json!({"plane": "XY", "name": "Lines"})),
+            ("sketch.line", json!({"points": [[0, 0], [500, 0]], "ids": ["a"]})),
+            ("sketch.line", json!({"points": [[0, 200], [500.3, 200]], "ids": ["b"]})),
+            ("sketch.finish", json!({})),
+            ("weld.member", json!({"sketch": "Tube", "path_sketch": "Lines", "path": ["a", "b"]})),
+        ] {
+            h.app.session.execute(cmd, &p).unwrap_or_else(|e| panic!("{cmd}: {e}"));
+        }
+        let rows = |h: &mut crate::scenario::Harness| {
+            h.app.dialog = None;
+            h.call("ui.start", json!({"command": "weld.cut_list"}));
+            h.frames(2);
+            match h.app.dialog.as_ref().map(|d| &d.kind) {
+                Some(crate::dialogs::Kind::CutList { data: Some(Ok(v)), .. }) => v["rows"].as_array().map_or(0, Vec::len),
+                _ => panic!("no cut list"),
+            }
+        };
+        assert_eq!(rows(&mut h), 2);
+        h.call("ui.prefs", json!({"cut_list_length_tolerance": 0.5}));
+        assert_eq!(rows(&mut h), 1);
+        super::defaults(&mut h.app, super::PAGE_DESIGN);
+        assert_eq!(h.app.preferences.cut_list_length_tolerance, 0.1);
+        h.app.preferences.cut_list_angle_tolerance = -1.0;
+        assert_eq!(super::cut_list_tolerances(&h.app)["angle_tolerance"], 0.05);
+        assert_eq!(rows(&mut h), 2);
     }
 
     /// The interface font (#1290): a font that can be read, or empty for the built-in one; saved
